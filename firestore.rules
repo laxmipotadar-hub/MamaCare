@@ -1,0 +1,84 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user is the owner of the document
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 1. Users Collection
+    match /users/{userId} {
+      // Users can only read and write their own profile
+      allow read, write: if isOwner(userId);
+    }
+
+    // 2. Posts Collection
+    match /posts/{postId} {
+      // Anyone authenticated can read community posts
+      allow read: if isAuthenticated();
+      // Only the author can create or update their post
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // 3. Replies Collection
+    match /replies/{replyId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // 4. Matches Collection
+    match /matches/{matchId} {
+      // Users can read/write matches if they are either the seeker or the matched user
+      allow read, write: if isAuthenticated() && 
+        (resource == null ? 
+          (request.resource.data.seekerUserId == request.auth.uid || request.resource.data.matchedUserId == request.auth.uid) : 
+          (resource.data.seekerUserId == request.auth.uid || resource.data.matchedUserId == request.auth.uid));
+    }
+
+    // 5. Mentors Collection
+    match /mentors/{mentorId} {
+      // Anyone can view mentors
+      allow read: if isAuthenticated();
+      // Mentors can only update their own profile
+      allow write: if isOwner(mentorId);
+    }
+
+    // 6. Bookings Collection
+    match /bookings/{bookingId} {
+      // Mentors and Clients can read their own bookings
+      allow read, write: if isAuthenticated() && 
+        (resource == null ? 
+          (request.resource.data.clientUserId == request.auth.uid || request.resource.data.mentorId == request.auth.uid) : 
+          (resource.data.clientUserId == request.auth.uid || resource.data.mentorId == request.auth.uid));
+    }
+
+    // 7. Health Logs Collection
+    match /healthLogs/{userId}/daily/{date} {
+      // Strictly private to the user
+      allow read, write: if isOwner(userId);
+    }
+
+    // 8. Marketplace Products
+    match /marketplace/products/{productId} {
+      // Read-only for clients, managed by Cloud Functions or Admins
+      allow read: if isAuthenticated();
+      allow write: if false; 
+    }
+
+    // 9. Active Users Pulse
+    match /activeUsers/{document=**} {
+      allow read: if isAuthenticated();
+      // Only updated by Cloud Functions heartbeat
+      allow write: if false;
+    }
+  }
+}
